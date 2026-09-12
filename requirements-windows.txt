@@ -1,0 +1,3 @@
+# Needed only for the optional golden-cookie detector on Windows.
+mss>=9,<11
+opencv-python-headless>=4.8,<5

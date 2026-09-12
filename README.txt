@@ -17,6 +17,13 @@ run_autoclicker.bat.
 4. Нажмите F6. По умолчанию клики начнутся через 2 секунды.
 5. Для остановки нажмите F6 или F8.
 
+Lovi zolotye pechenki (Windows)
+-------------------------------
+1. Odin raz zapustite install_windows.bat.
+2. F7 zapominaet osnovnoe pechenye.
+3. F9 nazhmite na pervom, zatem na protivopolozhnom uglu tolko igrovoy oblasti.
+4. V okne vklyuchite poisk zolotyh pechenek i zapustite F6.
+
 Горячие клавиши
 ---------------
 F6 — включить или выключить автокликер.

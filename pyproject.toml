@@ -21,6 +21,10 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+windows = [
+    "mss>=9,<11; platform_system == 'Windows'",
+    "opencv-python-headless>=4.8,<5; platform_system == 'Windows'",
+]
 macos = [
     "pyobjc-core==10.3.2; platform_system == 'Darwin'",
     "pyobjc-framework-Cocoa==10.3.2; platform_system == 'Darwin'",
@@ -31,4 +35,4 @@ macos = [
 cookie-clicker-autoclicker-macos = "autoclicker_macos:main"
 
 [tool.setuptools]
-py-modules = ["autoclicker", "autoclicker_macos", "macos_cocoa_ui"]
+py-modules = ["autoclicker", "autoclicker_macos", "golden_cookie_detector", "macos_cocoa_ui"]
