@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 
 @unittest.skipUnless(
@@ -14,15 +17,21 @@ class CocoaUiSmokeTests(unittest.TestCase):
     def setUp(self) -> None:
         os.environ["AUTOCLICKER_UI_SMOKE"] = "1"
         import AppKit
+        import autoclicker_macos as core
         from macos_cocoa_ui import CocoaAutoClickerApp
 
         self.appkit = AppKit
+        self.settings_directory = tempfile.TemporaryDirectory()
+        self.settings_patch = patch.object(core, "SETTINGS_PATH", Path(self.settings_directory.name) / "settings.json")
+        self.settings_patch.start()
         AppKit.NSApplication.sharedApplication()
         self.controller = CocoaAutoClickerApp.alloc().init()
         self.controller.show()
 
     def tearDown(self) -> None:
         self.controller.window.close()
+        self.settings_patch.stop()
+        self.settings_directory.cleanup()
         os.environ.pop("AUTOCLICKER_UI_SMOKE", None)
 
     def test_window_contains_visible_controls(self) -> None:
@@ -36,8 +45,8 @@ class CocoaUiSmokeTests(unittest.TestCase):
         self.assertEqual(self.controller.window.level(), self.appkit.NSNormalWindowLevel)
 
     def test_default_values_are_rendered(self) -> None:
-        self.assertEqual(self.controller.cps_field.stringValue(), "20")
-        self.assertEqual(self.controller.delay_field.stringValue(), "2")
+        self.assertEqual(self.controller.cps_field.stringValue(), "100")
+        self.assertEqual(self.controller.delay_field.stringValue(), "0")
         self.assertEqual(self.controller.target_popup.indexOfSelectedItem(), 0)
 
     def test_starts_at_100_clicks_per_second_without_delay(self) -> None:

@@ -44,8 +44,8 @@ app = BUNDLE(
     bundle_identifier="io.github.yavladimir.autoclicker",
     info_plist={
         "CFBundleDisplayName": "Автокликер",
-        "CFBundleShortVersionString": "1.0.1",
-        "CFBundleVersion": "1.0.1",
+        "CFBundleShortVersionString": "1.0.2",
+        "CFBundleVersion": "1.0.2",
         "NSAppleEventsUsageDescription": "Автокликер отправляет клики только по команде пользователя.",
     },
 )

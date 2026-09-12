@@ -28,6 +28,7 @@ class CocoaAutoClickerApp(NSObject):
         self.engine = core.ClickEngine(core.send_mouse_click)
         self.hotkey_listener = core.HotkeyListener(self.events)
         self.hotkeys = core.load_hotkeys()
+        self.click_preferences = core.load_click_preferences()
         self.fixed_position: tuple[float, float] | None = None
         self.countdown_timer = None
         self.countdown_deadline = 0.0
@@ -65,15 +66,16 @@ class CocoaAutoClickerApp(NSObject):
 
         self._label("Настройки клика", 26, 415, 500, 20, size=14, bold=True)
         self._label("Кликов в секунду", 27, 380, 135, 20)
-        self.cps_field = self._text_field("20", 170, 377, 80, 24)
-        for index, value in enumerate((10, 20, 50)):
+        self.cps_field = self._text_field(self.click_preferences["cps"], 170, 377, 80, 24)
+        for index, value in enumerate((10, 20, 50, 100)):
             button = self._button(str(value), 260 + index * 58, 377, 52, 24, "setSpeed:")
             button.setTag_(value)
 
         self._label("Кнопка мыши", 27, 342, 135, 20)
         self.button_popup = self._popup(["Левая", "Правая", "Средняя"], 170, 339, 165, 26)
+        self.button_popup.selectItemAtIndex_(("left", "right", "middle").index(self.click_preferences["mouse_button"]))
         self._label("Задержка старта, сек.", 27, 304, 135, 20)
-        self.delay_field = self._text_field("2", 170, 301, 80, 24)
+        self.delay_field = self._text_field(self.click_preferences["delay"], 170, 301, 80, 24)
 
         self._label("Куда кликать", 26, 255, 500, 20, size=14, bold=True)
         self.target_popup = self._popup(["Под текущим курсором", "В сохранённую точку"], 27, 221, 265, 26)
@@ -251,6 +253,10 @@ class CocoaAutoClickerApp(NSObject):
             return
         button_names = ("left", "right", "middle")
         config = core.ClickConfig(cps, button_names[self.button_popup.indexOfSelectedItem()], self.fixed_position if fixed else None)
+        try:
+            core.save_click_preferences(self.cps_field.stringValue(), self.delay_field.stringValue(), config.mouse_button)
+        except OSError:
+            pass
         self._set_controls_enabled(False)
         self.stop_button.setEnabled_(True)
         if delay:

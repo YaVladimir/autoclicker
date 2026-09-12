@@ -31,6 +31,7 @@ KEY_NAMES = {
 }
 HOTKEY_ACTIONS = (("toggle", "Старт / пауза"), ("capture", "Запомнить точку"), ("stop", "Остановить всё"))
 DEFAULT_HOTKEYS = {"toggle": 97, "capture": 98, "stop": 100}
+DEFAULT_CLICK_PREFERENCES = {"cps": "100", "delay": "0", "mouse_button": "left"}
 # The application bundle is read-only after installation, so settings belong in
 # the user's standard Application Support directory rather than beside the code.
 SETTINGS_PATH = Path.home() / "Library" / "Application Support" / "Autoclicker" / "settings.json"
@@ -53,17 +54,27 @@ def validate_hotkeys(value: object) -> dict[str, int]:
     return result if len(set(result.values())) == len(result) else DEFAULT_HOTKEYS.copy()
 
 
-def load_hotkeys() -> dict[str, int]:
+def _load_settings() -> dict[str, object]:
     try:
         saved = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return DEFAULT_HOTKEYS.copy()
-    return validate_hotkeys(saved.get("hotkeys") if isinstance(saved, dict) else None)
+        return {}
+    return saved if isinstance(saved, dict) else {}
+
+
+def _save_settings(settings: dict[str, object]) -> None:
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SETTINGS_PATH.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_hotkeys() -> dict[str, int]:
+    return validate_hotkeys(_load_settings().get("hotkeys"))
 
 
 def save_hotkeys(hotkeys: dict[str, int]) -> None:
-    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps({"version": 1, "hotkeys": hotkeys}, ensure_ascii=False, indent=2), encoding="utf-8")
+    settings = _load_settings()
+    settings.update({"version": 2, "hotkeys": hotkeys})
+    _save_settings(settings)
 
 
 @dataclass(frozen=True)
@@ -84,6 +95,32 @@ def parse_settings(cps_text: str, delay_text: str) -> tuple[float, float]:
     if not 0 <= delay <= 10:
         raise ValueError("Задержка должна быть от 0 до 10 секунд.")
     return cps, delay
+
+
+def load_click_preferences() -> dict[str, str]:
+    saved = _load_settings().get("click_preferences")
+    if not isinstance(saved, dict):
+        return DEFAULT_CLICK_PREFERENCES.copy()
+    cps_text, delay_text = str(saved.get("cps", "")), str(saved.get("delay", ""))
+    if saved.get("mouse_button") not in {"left", "right", "middle"}:
+        return DEFAULT_CLICK_PREFERENCES.copy()
+    try:
+        parse_settings(cps_text, delay_text)
+    except ValueError:
+        return DEFAULT_CLICK_PREFERENCES.copy()
+    return {"cps": cps_text, "delay": delay_text, "mouse_button": str(saved["mouse_button"])}
+
+
+def save_click_preferences(cps_text: str, delay_text: str, mouse_button: str) -> None:
+    cps, delay = parse_settings(cps_text, delay_text)
+    if mouse_button not in {"left", "right", "middle"}:
+        raise ValueError("Неизвестная кнопка мыши.")
+    settings = _load_settings()
+    settings.update({
+        "version": 2,
+        "click_preferences": {"cps": f"{cps:g}", "delay": f"{delay:g}", "mouse_button": mouse_button},
+    })
+    _save_settings(settings)
 
 
 def cursor_position() -> tuple[float, float]:

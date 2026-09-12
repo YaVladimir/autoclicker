@@ -45,6 +45,24 @@ class SettingsTests(unittest.TestCase):
                 self.assertTrue(path.exists())
                 self.assertEqual(app.load_hotkeys(), hotkeys)
 
+    def test_saves_click_preferences_without_overwriting_hotkeys(self) -> None:
+        hotkeys = {"toggle": 120, "capture": 122, "stop": 99}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            with patch.object(app, "SETTINGS_PATH", path):
+                app.save_hotkeys(hotkeys)
+                app.save_click_preferences("55", "0,5", "right")
+                self.assertEqual(app.load_hotkeys(), hotkeys)
+                self.assertEqual(
+                    app.load_click_preferences(),
+                    {"cps": "55", "delay": "0.5", "mouse_button": "right"},
+                )
+
+    def test_uses_fast_defaults_when_preferences_are_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(app, "SETTINGS_PATH", Path(directory) / "settings.json"):
+                self.assertEqual(app.load_click_preferences(), app.DEFAULT_CLICK_PREFERENCES)
+
 
 class ClickEngineTests(unittest.TestCase):
     def test_starts_and_stops_cleanly(self) -> None:

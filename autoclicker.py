@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import ctypes
 from dataclasses import dataclass
+import json
+import os
+from pathlib import Path
 import threading
 import time
 import tkinter as tk
@@ -37,6 +40,8 @@ class POINT(ctypes.Structure):
 INPUT_MOUSE = 0
 MOUSE_FLAGS = {"left": (0x0002, 0x0004), "right": (0x0008, 0x0010), "middle": (0x0020, 0x0040)}
 VK_F6, VK_F7, VK_F8 = 0x75, 0x76, 0x77
+DEFAULT_CLICK_PREFERENCES = {"cps": "100", "delay": "0", "mouse_button": "left"}
+SETTINGS_PATH = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "Autoclicker" / "settings.json"
 MOUSE_LOCK = threading.Lock()
 user32 = ctypes.windll.user32
 user32.SendInput.argtypes = (ctypes.c_uint, ctypes.POINTER(INPUT), ctypes.c_int)
@@ -63,6 +68,34 @@ def parse_settings(cps_text: str, delay_text: str) -> tuple[float, float]:
     if not 0 <= delay <= 10:
         raise ValueError("Задержка должна быть от 0 до 10 секунд.")
     return cps, delay
+
+
+def load_click_preferences() -> dict[str, str]:
+    try:
+        saved = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return DEFAULT_CLICK_PREFERENCES.copy()
+    if not isinstance(saved, dict):
+        return DEFAULT_CLICK_PREFERENCES.copy()
+    cps_text, delay_text = str(saved.get("cps", "")), str(saved.get("delay", ""))
+    if saved.get("mouse_button") not in {"left", "right", "middle"}:
+        return DEFAULT_CLICK_PREFERENCES.copy()
+    try:
+        parse_settings(cps_text, delay_text)
+    except ValueError:
+        return DEFAULT_CLICK_PREFERENCES.copy()
+    return {"cps": cps_text, "delay": delay_text, "mouse_button": str(saved["mouse_button"])}
+
+
+def save_click_preferences(cps_text: str, delay_text: str, mouse_button: str) -> None:
+    cps, delay = parse_settings(cps_text, delay_text)
+    if mouse_button not in {"left", "right", "middle"}:
+        raise ValueError("Неизвестная кнопка мыши.")
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SETTINGS_PATH.write_text(
+        json.dumps({"cps": f"{cps:g}", "delay": f"{delay:g}", "mouse_button": mouse_button}, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def _emit_mouse_click(button: str) -> None:
@@ -121,8 +154,11 @@ class AutoClickerApp:
         self.fixed_position: tuple[int, int] | None = None
         self.countdown_id: str | None = None
         self.key_state = {key: False for key in (VK_F6, VK_F7, VK_F8)}
-        self.cps_var, self.delay_var = tk.StringVar(value="20"), tk.StringVar(value="2")
-        self.button_var, self.target_var = tk.StringVar(value="left"), tk.StringVar(value="cursor")
+        self.click_preferences = load_click_preferences()
+        self.cps_var = tk.StringVar(value=self.click_preferences["cps"])
+        self.delay_var = tk.StringVar(value=self.click_preferences["delay"])
+        self.button_var = tk.StringVar(value=self.click_preferences["mouse_button"])
+        self.target_var = tk.StringVar(value="cursor")
         self.status_var, self.detail_var = tk.StringVar(value="ГОТОВ"), tk.StringVar(value="Наведите курсор на цель и нажмите F6")
         self.position_var = tk.StringVar(value="Точка ещё не выбрана")
         self._build()
@@ -139,7 +175,7 @@ class AutoClickerApp:
         settings = ttk.LabelFrame(body, text="Настройки", padding=12); settings.pack(fill="x")
         ttk.Label(settings, text="Кликов в секунду").grid(row=0, column=0, sticky="w")
         self.cps = ttk.Spinbox(settings, from_=1, to=100, textvariable=self.cps_var, width=8); self.cps.grid(row=0, column=1, padx=10)
-        for index, value in enumerate((10, 20, 50)):
+        for index, value in enumerate((10, 20, 50, 100)):
             ttk.Button(settings, text=str(value), command=lambda item=value: self.cps_var.set(str(item))).grid(row=0, column=index + 2, padx=2)
         ttk.Label(settings, text="Кнопка мыши").grid(row=1, column=0, sticky="w", pady=(12, 0))
         mouse = ttk.Frame(settings); mouse.grid(row=1, column=1, columnspan=4, sticky="w", pady=(12, 0))
@@ -183,6 +219,8 @@ class AutoClickerApp:
         position = self.fixed_position if self.target_var.get() == "fixed" else None
         if self.target_var.get() == "fixed" and position is None:
             messagebox.showwarning("Не выбрана точка", "Сначала сохраните точку кнопкой F7.", parent=self.root); return
+        try: save_click_preferences(self.cps_var.get(), self.delay_var.get(), self.button_var.get())
+        except OSError: pass
         self._set_controls(False); self.stop_button.configure(state="normal")
         config = ClickConfig(cps, self.button_var.get(), position)
         if delay: self._countdown(config, delay)
