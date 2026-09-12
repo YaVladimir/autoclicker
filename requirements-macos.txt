@@ -1,0 +1,5 @@
+# Python 3.9 (the version bundled with older macOS releases) is supported by
+# PyObjC 10.x. The three packages must use the same release series.
+pyobjc-core==10.3.2
+pyobjc-framework-Cocoa==10.3.2
+pyobjc-framework-Quartz==10.3.2
