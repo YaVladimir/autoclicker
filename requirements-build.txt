@@ -1,0 +1,2 @@
+# Used only to make distributable applications, not to run the source code.
+pyinstaller==6.11.1

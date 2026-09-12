@@ -6,6 +6,7 @@ __pycache__/
 .coverage
 htmlcov/
 .venv/
+.venv-build/
 venv/
 
 # User-specific autoclicker settings
@@ -16,3 +17,8 @@ autoclicker_macos_settings.json
 .DS_Store
 Thumbs.db
 *.app/Contents/Resources/__pycache__/
+
+# Local packaging output
+build/
+dist/
+*.spec.bak

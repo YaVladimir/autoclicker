@@ -30,6 +30,8 @@ class CocoaUiSmokeTests(unittest.TestCase):
         self.assertTrue(self.controller.window.isVisible())
         self.assertGreaterEqual(len(self.controller.content.subviews()), 20)
         self.assertEqual(self.controller.start_button.title(), "Запустить")
+        self.assertEqual(self.controller.hotkeys_button.title(), "Горячие клавиши…")
+        self.assertIn("F6", self.controller.hotkey_summary_label.stringValue())
         self.assertFalse(self.controller.topmost_check.state())
         self.assertEqual(self.controller.window.level(), self.appkit.NSNormalWindowLevel)
 
@@ -49,6 +51,9 @@ class CocoaUiSmokeTests(unittest.TestCase):
                 self.config = config
                 self.running = True
                 return True
+
+            def stop(self) -> None:
+                self.running = False
 
         engine = FakeEngine()
         self.controller.engine = engine

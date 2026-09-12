@@ -31,7 +31,9 @@ KEY_NAMES = {
 }
 HOTKEY_ACTIONS = (("toggle", "Старт / пауза"), ("capture", "Запомнить точку"), ("stop", "Остановить всё"))
 DEFAULT_HOTKEYS = {"toggle": 97, "capture": 98, "stop": 100}
-SETTINGS_PATH = Path(__file__).with_name("autoclicker_macos_settings.json")
+# The application bundle is read-only after installation, so settings belong in
+# the user's standard Application Support directory rather than beside the code.
+SETTINGS_PATH = Path.home() / "Library" / "Application Support" / "Autoclicker" / "settings.json"
 MOUSE_LOCK = threading.Lock()
 
 
@@ -60,6 +62,7 @@ def load_hotkeys() -> dict[str, int]:
 
 
 def save_hotkeys(hotkeys: dict[str, int]) -> None:
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_PATH.write_text(json.dumps({"version": 1, "hotkeys": hotkeys}, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 
 # The functions under test do not call Quartz. A small placeholder keeps the
@@ -26,6 +29,21 @@ class SettingsTests(unittest.TestCase):
 
     def test_restores_defaults_for_invalid_hotkeys(self) -> None:
         self.assertEqual(app.validate_hotkeys({"toggle": 1}), app.DEFAULT_HOTKEYS)
+
+    def test_restores_defaults_for_duplicate_hotkeys(self) -> None:
+        self.assertEqual(
+            app.validate_hotkeys({"toggle": 97, "capture": 97, "stop": 100}),
+            app.DEFAULT_HOTKEYS,
+        )
+
+    def test_saves_and_loads_valid_hotkeys(self) -> None:
+        hotkeys = {"toggle": 120, "capture": 122, "stop": 99}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "new-settings-folder" / "settings.json"
+            with patch.object(app, "SETTINGS_PATH", path):
+                app.save_hotkeys(hotkeys)
+                self.assertTrue(path.exists())
+                self.assertEqual(app.load_hotkeys(), hotkeys)
 
 
 class ClickEngineTests(unittest.TestCase):

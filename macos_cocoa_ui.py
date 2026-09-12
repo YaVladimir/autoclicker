@@ -95,8 +95,9 @@ class CocoaAutoClickerApp(NSObject):
         self.stop_button.setEnabled_(False)
 
         self.topmost_check = self._checkbox("Поверх других окон", 27, 45, 185, "toggleTopmost:")
-        self._label(
-            f"{self._hotkey('toggle')} — старт  •  {self._hotkey('capture')} — точка  •  {self._hotkey('stop')} — стоп",
+        self.hotkeys_button = self._button("Горячие клавиши…", 222, 45, 170, 22, "configureHotkeys:")
+        self.hotkey_summary_label = self._label(
+            self._hotkey_summary(),
             27,
             16,
             500,
@@ -109,6 +110,7 @@ class CocoaAutoClickerApp(NSObject):
             self.button_popup,
             self.target_popup,
             self.capture_button,
+            self.hotkeys_button,
         ]
 
     @objc.python_method
@@ -155,6 +157,14 @@ class CocoaAutoClickerApp(NSObject):
         checkbox.setState_(AppKit.NSControlStateValueOff)
         return checkbox
 
+    @objc.python_method
+    def _hotkey_summary(self) -> str:
+        return (
+            f"{self._hotkey('toggle')} — старт  •  "
+            f"{self._hotkey('capture')} — точка  •  "
+            f"{self._hotkey('stop')} — стоп"
+        )
+
     def show(self) -> None:
         self.window.makeKeyAndOrderFront_(None)
         AppKit.NSApp().activateIgnoringOtherApps_(True)
@@ -169,6 +179,49 @@ class CocoaAutoClickerApp(NSObject):
     def toggleTopmost_(self, _sender: object) -> None:
         level = AppKit.NSFloatingWindowLevel if self.topmost_check.state() else AppKit.NSNormalWindowLevel
         self.window.setLevel_(level)
+
+    def configureHotkeys_(self, _sender: object) -> None:
+        if self.engine.running or self.countdown_timer is not None:
+            return
+
+        alert = AppKit.NSAlert.alloc().init()
+        alert.setMessageText_("Горячие клавиши")
+        alert.setInformativeText_("Выберите отдельную F-клавишу для каждого действия.")
+        alert.addButtonWithTitle_("Сохранить")
+        alert.addButtonWithTitle_("Отмена")
+
+        accessory = AppKit.NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 320, 96))
+        selectors: dict[str, object] = {}
+        function_keys = tuple(code for code, name in core.KEY_NAMES.items() if name.startswith("F"))
+        for index, (action, title) in enumerate(core.HOTKEY_ACTIONS):
+            label = AppKit.NSTextField.labelWithString_(title)
+            label.setFrame_(NSMakeRect(0, 68 - index * 32, 145, 20))
+            accessory.addSubview_(label)
+            popup = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(
+                NSMakeRect(155, 65 - index * 32, 105, 26), False
+            )
+            for key_code in function_keys:
+                popup.addItemWithTitle_(core.hotkey_name(key_code))
+                popup.lastItem().setTag_(key_code)
+            popup.selectItemWithTag_(self.hotkeys[action])
+            accessory.addSubview_(popup)
+            selectors[action] = popup
+        alert.setAccessoryView_(accessory)
+
+        if alert.runModal() != AppKit.NSAlertFirstButtonReturn:
+            return
+        selected = {action: popup.selectedItem().tag() for action, popup in selectors.items()}
+        if len(set(selected.values())) != len(selected):
+            self._show_alert("Клавиши повторяются", "Для каждого действия выберите отдельную клавишу.")
+            return
+        try:
+            core.save_hotkeys(selected)
+        except OSError as exc:
+            self._show_alert("Не удалось сохранить", str(exc))
+            return
+        self.hotkeys = selected
+        self.hotkey_summary_label.setStringValue_(self._hotkey_summary())
+        self._set_status("ГОТОВ", "Горячие клавиши сохранены")
 
     def capturePosition_(self, _sender: object) -> None:
         if self.engine.running or self.countdown_timer is not None:
