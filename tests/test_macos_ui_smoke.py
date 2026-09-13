@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,7 +11,7 @@ from unittest.mock import patch
 
 
 @unittest.skipUnless(
-    os.uname().sysname == "Darwin" and os.environ.get("RUN_MACOS_UI_SMOKE") == "1",
+    sys.platform == "darwin" and os.environ.get("RUN_MACOS_UI_SMOKE") == "1",
     "set RUN_MACOS_UI_SMOKE=1 on a logged-in Mac desktop to run native UI checks",
 )
 class CocoaUiSmokeTests(unittest.TestCase):

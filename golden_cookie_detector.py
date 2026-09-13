@@ -16,10 +16,12 @@ import threading
 import time
 from typing import Callable, Iterable
 
+_opencv_import_error: str | None = None
 try:
     import cv2
     import numpy as np
-except ImportError:  # The rest of the autoclicker should still start normally.
+except ImportError as exc:  # The rest of the autoclicker should still start normally.
+    _opencv_import_error = str(exc)
     cv2 = None  # type: ignore[assignment]
     np = None  # type: ignore[assignment]
 
@@ -81,6 +83,10 @@ class GoldenCookieFinder:
         # pieces into one blob before circularity is measured.
         saturated_gold = cv2.inRange(hsv, np.array((12, 90, 130)), np.array((43, 255, 255)))
         warm_highlight = cv2.inRange(hsv, np.array((8, 45, 210)), np.array((52, 255, 255)))
+        saturated_red = cv2.bitwise_or(
+            cv2.inRange(hsv, np.array((0, 90, 80)), np.array((11, 255, 255))),
+            cv2.inRange(hsv, np.array((170, 90, 80)), np.array((179, 255, 255))),
+        )
         mask = cv2.bitwise_or(saturated_gold, warm_highlight)
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
@@ -111,6 +117,12 @@ class GoldenCookieFinder:
             perimeter = float(cv2.arcLength(contour, True))
             circularity = (4 * pi * area / (perimeter * perimeter)) if perimeter else 0.0
             if circularity < 0.34:
+                continue
+            # A wrath cookie has warm highlights too, but most of its body is
+            # saturated red. Reject it before those highlights can pass the
+            # generic round-object score.
+            red_fraction = float(saturated_red[y:y + box_height, x:x + box_width].mean()) / 255
+            if red_fraction >= 0.22:
                 continue
             gold_fraction = float(mask[y:y + box_height, x:x + box_width].mean()) / 255
             score = 0.35 * aspect + 0.25 * min(fill / 0.70, 1.0) + 0.25 * min(circularity / 0.80, 1.0) + 0.15 * gold_fraction
@@ -175,17 +187,24 @@ class GoldenCookieWatcher:
         self,
         region: ScreenRegion,
         click_action: Callable[[tuple[int, int]], None],
-        events: queue.SimpleQueue[tuple[str, object]],
+        events: queue.SimpleQueue[tuple[int, str, object]],
         *,
+        session_id: int = 0,
         frames_per_second: float = 8,
         warmup_seconds: float = 0.75,
+        capture_frame: Callable[[], object] | None = None,
+        finder: GoldenCookieFinder | None = None,
     ) -> None:
         self.region = region
         self._click_action = click_action
         self._events = events
+        self.session_id = session_id
         self._frames_per_second = frames_per_second
         self._warmup_seconds = warmup_seconds
+        self._capture_frame = capture_frame
+        self._finder = finder
         self._stop_event = threading.Event()
+        self._action_lock = threading.Lock()
         self._thread: threading.Thread | None = None
 
     @property
@@ -197,50 +216,96 @@ class GoldenCookieWatcher:
             return False
         dependency_error = missing_dependencies()
         if dependency_error:
-            self._events.put(("golden-error", dependency_error))
+            self._emit("golden-error", dependency_error)
             return False
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True, name="GoldenCookieWatcher")
         self._thread.start()
         return True
 
-    def stop(self) -> None:
+    def stop(self, timeout: float = 1.0) -> bool:
+        """Stop detection and prevent a click action from starting afterwards."""
         self._stop_event.set()
-        if self._thread and self._thread is not threading.current_thread():
-            self._thread.join(timeout=1)
+        thread = self._thread
+        if thread and thread is not threading.current_thread():
+            # Close the race between the last stop check and the callback.
+            # An active callback finishes; a pending one observes the stop flag.
+            with self._action_lock:
+                pass
+            thread.join(timeout=timeout)
+        return not self.running
+
+    def _emit(self, name: str, payload: object) -> None:
+        self._events.put((self.session_id, name, payload))
 
     def _run(self) -> None:
         try:
+            finder = self._finder or GoldenCookieFinder()
+            if self._capture_frame is not None:
+                self._watch(self._capture_frame, finder)
+            else:
+                import mss
+
+                monitor = {
+                    "left": self.region.left,
+                    "top": self.region.top,
+                    "width": self.region.width,
+                    "height": self.region.height,
+                }
+                with mss.mss() as screen:
+                    self._watch(lambda: np.asarray(screen.grab(monitor))[:, :, :3], finder)
+        except Exception as exc:  # Keep normal clicking alive if detection fails.
+            if not self._stop_event.is_set():
+                self._emit("golden-error", f"Поиск золотых печенек остановлен: {exc}")
+        finally:
+            self._emit("golden-stopped", None)
+
+    def _watch(self, capture_frame: Callable[[], object], finder: GoldenCookieFinder) -> None:
+        gate = CandidateGate()
+        learning_ends = time.monotonic() + self._warmup_seconds
+        next_frame = time.perf_counter()
+        while not self._stop_event.is_set():
+            image = capture_frame()
+            candidates = finder.find(image)
+            if self._stop_event.is_set():
+                break
+            if time.monotonic() < learning_ends:
+                gate.learn(candidates)
+            else:
+                target = gate.choose(candidates)
+                if target is not None:
+                    point = (round(self.region.left + target.x), round(self.region.top + target.y))
+                    with self._action_lock:
+                        if self._stop_event.is_set():
+                            break
+                        self._click_action(point)
+                    gate.mark_handled(target)
+                    self._emit("golden-caught", point)
+            now = time.perf_counter()
+            next_frame += 1 / self._frames_per_second
+            if now - next_frame > 1 / self._frames_per_second:
+                next_frame = now
+            self._stop_event.wait(max(0, next_frame - now))
+
+
+def detector_self_check(*, check_capture_backend: bool = False) -> str | None:
+    """Exercise packaged detector components without capturing or clicking."""
+    dependency_error = missing_dependencies()
+    if dependency_error:
+        if _opencv_import_error:
+            return f"{dependency_error} Причина OpenCV: {_opencv_import_error}"
+        return dependency_error
+    if check_capture_backend:
+        try:
             import mss
 
-            finder = GoldenCookieFinder()
-            gate = CandidateGate()
-            monitor = {
-                "left": self.region.left,
-                "top": self.region.top,
-                "width": self.region.width,
-                "height": self.region.height,
-            }
-            learning_ends = time.monotonic() + self._warmup_seconds
-            next_frame = time.perf_counter()
             with mss.mss() as screen:
-                while not self._stop_event.is_set():
-                    image = np.asarray(screen.grab(monitor))[:, :, :3]
-                    candidates = finder.find(image)
-                    if time.monotonic() < learning_ends:
-                        gate.learn(candidates)
-                    else:
-                        target = gate.choose(candidates)
-                        if target is not None:
-                            point = (round(self.region.left + target.x), round(self.region.top + target.y))
-                            self._click_action(point)
-                            gate.mark_handled(target)
-                            self._events.put(("golden-caught", point))
-                    now = time.perf_counter()
-                    next_frame += 1 / self._frames_per_second
-                    if now - next_frame > 1 / self._frames_per_second:
-                        next_frame = now
-                    self._stop_event.wait(max(0, next_frame - now))
-            self._events.put(("golden-stopped", None))
-        except Exception as exc:  # Keep normal clicking alive if detection fails.
-            self._events.put(("golden-error", f"Поиск золотых печенек остановлен: {exc}"))
+                if not screen.monitors:
+                    return "mss загружен, но не обнаружил ни одного экрана."
+        except Exception as exc:
+            return f"mss загружен, но не может открыть экран: {exc}"
+    frame = np.zeros((160, 160, 3), dtype=np.uint8)
+    cv2.circle(frame, (80, 80), 32, (0, 205, 255), thickness=-1)
+    if not GoldenCookieFinder().find(frame):
+        return "OpenCV загружен, но контрольная золотая цель не распознана."
+    return None

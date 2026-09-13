@@ -8,13 +8,14 @@ import json
 import os
 from pathlib import Path
 import queue
+import sys
 import threading
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Callable
 
-from golden_cookie_detector import GoldenCookieWatcher, ScreenRegion, missing_dependencies
+from golden_cookie_detector import GoldenCookieWatcher, ScreenRegion, detector_self_check, missing_dependencies
 
 
 if ctypes.sizeof(ctypes.c_void_p) == 8:
@@ -138,6 +139,11 @@ def click_then_restore(button: str, target: tuple[int, int], restore: tuple[int,
             user32.SetCursorPos(*restore)
 
 
+def click_golden_cookie(target: tuple[int, int], restore: tuple[int, int]) -> None:
+    """Golden cookies always require a normal left click."""
+    click_then_restore("left", target, restore)
+
+
 class ClickEngine:
     def __init__(self, click_action: Callable[[str, tuple[int, int] | None], None]):
         self._click_action = click_action
@@ -176,13 +182,14 @@ class ClickEngine:
 
 
 class AutoClickerApp:
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, *, enable_hotkeys: bool = True):
         self.root, self.engine = root, ClickEngine(send_mouse_click)
         self.fixed_position: tuple[int, int] | None = None
         self.game_region: ScreenRegion | None = None
         self.region_first_corner: tuple[int, int] | None = None
         self.golden_watcher: GoldenCookieWatcher | None = None
-        self.golden_events: queue.SimpleQueue[tuple[str, object]] = queue.SimpleQueue()
+        self.golden_events: queue.SimpleQueue[tuple[int, str, object]] = queue.SimpleQueue()
+        self._golden_session = 0
         self._golden_pending = False
         self.countdown_id: str | None = None
         self.key_state = {key: False for key in (VK_F6, VK_F7, VK_F8, VK_F9)}
@@ -196,7 +203,8 @@ class AutoClickerApp:
         self.position_var = tk.StringVar(value="Точка ещё не выбрана")
         self.region_var = tk.StringVar(value="Игровая область ещё не выбрана")
         self._build()
-        self.root.after(30, self._poll_hotkeys)
+        if enable_hotkeys:
+            self.root.after(30, self._poll_hotkeys)
         self.root.after(100, self._poll_golden_events)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -325,31 +333,45 @@ class AutoClickerApp:
             return
 
         def catch(point: tuple[int, int]) -> None:
-            click_then_restore(config.mouse_button, point, config.fixed_position)
+            click_golden_cookie(point, config.fixed_position)
 
-        self.golden_watcher = GoldenCookieWatcher(self.game_region, catch, self.golden_events)
+        self._golden_session += 1
+        self.golden_watcher = GoldenCookieWatcher(
+            self.game_region,
+            catch,
+            self.golden_events,
+            session_id=self._golden_session,
+        )
         if self.golden_watcher.start():
             self.detail_var.set(f"{config.cps:g} кликов/с. Поиск золотых печенек калибруется…")
 
     def _poll_golden_events(self) -> None:
         while True:
             try:
-                name, payload = self.golden_events.get_nowait()
+                session_id, name, payload = self.golden_events.get_nowait()
             except queue.Empty:
                 break
+            if session_id != self._golden_session:
+                continue
             if name == "golden-caught":
                 x, y = payload
                 self.detail_var.set(f"Золотая печенька поймана: X {x}, Y {y}. Основное печенье продолжает кликаться.")
             elif name == "golden-error":
-                self.status_var.set("ПОИСК ОСТАНОВЛЕН")
-                self.detail_var.set(str(payload))
+                self.golden_watcher = None
+                if self.engine.running:
+                    self.status_var.set("РАБОТАЕТ")
+                    self.detail_var.set(f"Обычные клики продолжаются. {payload}")
+                else:
+                    self.status_var.set("ГОТОВ")
+                    self.detail_var.set(str(payload))
         self.root.after(100, self._poll_golden_events)
 
     def stop(self) -> None:
         if self.countdown_id: self.root.after_cancel(self.countdown_id); self.countdown_id = None
-        if self.golden_watcher:
-            self.golden_watcher.stop()
-            self.golden_watcher = None
+        self._golden_session += 1
+        watcher, self.golden_watcher = self.golden_watcher, None
+        if watcher:
+            watcher.stop()
         self._golden_pending = False
         self.engine.stop(); self._set_controls(True); self.stop_button.configure(state="disabled"); self.start_button.configure(text="Запустить  (F6)")
         self.status_var.set("ГОТОВ"); self.detail_var.set("Наведите курсор на цель и нажмите F6")
@@ -363,9 +385,23 @@ class AutoClickerApp:
         self.stop(); self.root.destroy()
 
 
-def main() -> None:
-    root = tk.Tk(); AutoClickerApp(root); root.mainloop()
+def main(argv: list[str] | None = None) -> int:
+    args = set(sys.argv[1:] if argv is None else argv)
+    if "--check-golden-detector" in args:
+        error = detector_self_check(check_capture_backend=True)
+        report_path = os.environ.get("AUTOCLICKER_SELF_CHECK_REPORT")
+        if report_path:
+            Path(report_path).write_text(error or "ok", encoding="utf-8")
+        return 1 if error else 0
+
+    smoke_test = "--smoke-test" in args
+    root = tk.Tk()
+    app = AutoClickerApp(root, enable_hotkeys=not smoke_test)
+    if smoke_test:
+        root.after(500, app.close)
+    root.mainloop()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

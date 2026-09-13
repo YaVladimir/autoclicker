@@ -35,8 +35,20 @@ jobs:
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: python -m pip install -r requirements-macos.txt
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        run: python -m pip install -r requirements-windows.txt
       - name: Build application
         run: pyinstaller --noconfirm ${{ matrix.spec }}
+      - name: Verify Windows application
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:AUTOCLICKER_SELF_CHECK_REPORT = Join-Path $env:RUNNER_TEMP "autoclicker-self-check.txt"
+          $dependencyCheck = Start-Process -FilePath "dist\Автокликер.exe" -ArgumentList "--check-golden-detector" -WindowStyle Hidden -Wait -PassThru
+          if ($dependencyCheck.ExitCode -ne 0) { throw "Golden-cookie detector self-check failed: $(Get-Content $env:AUTOCLICKER_SELF_CHECK_REPORT -Raw)" }
+          $windowSmoke = Start-Process -FilePath "dist\Автокликер.exe" -ArgumentList "--smoke-test" -WindowStyle Hidden -Wait -PassThru
+          if ($windowSmoke.ExitCode -ne 0) { throw "Windows GUI smoke test failed." }
       - name: Package macOS app
         if: runner.os == 'macOS'
         run: ditto -c -k --sequesterRsrc --keepParent dist/Автокликер.app dist/Автокликер-macOS.zip
