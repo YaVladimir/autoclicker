@@ -10,7 +10,7 @@ analysis = Analysis(
     ["autoclicker.py"],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[("golden_cookie_assets/*.png", "golden_cookie_assets")],
     hiddenimports=["mss"],
     hookspath=[],
     hooksconfig={},

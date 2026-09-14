@@ -15,7 +15,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Callable
 
-from golden_cookie_detector import GoldenCookieWatcher, ScreenRegion, detector_self_check, missing_dependencies
+from golden_cookie_detector import GoldenCookieFinder, GoldenCookieWatcher, ScreenRegion, detector_self_check, missing_dependencies
 
 
 if ctypes.sizeof(ctypes.c_void_p) == 8:
@@ -199,6 +199,7 @@ class AutoClickerApp:
         self.button_var = tk.StringVar(value=self.click_preferences["mouse_button"])
         self.target_var = tk.StringVar(value="cursor")
         self.golden_var = tk.BooleanVar(value=False)
+        self.wrath_var = tk.BooleanVar(value=False)
         self.status_var, self.detail_var = tk.StringVar(value="ГОТОВ"), tk.StringVar(value="Наведите курсор на цель и нажмите F6")
         self.position_var = tk.StringVar(value="Точка ещё не выбрана")
         self.region_var = tk.StringVar(value="Игровая область ещё не выбрана")
@@ -210,16 +211,39 @@ class AutoClickerApp:
 
     def _build(self) -> None:
         self.root.title("Автокликер")
-        self.root.geometry("520x590")
-        self.root.resizable(False, False)
-        body = ttk.Frame(self.root, padding=20); body.pack(fill="both", expand=True)
-        ttk.Label(body, text="Автокликер", font=("Segoe UI", 20, "bold")).pack(anchor="w")
-        ttk.Label(body, text="Для Cookie Clicker и других игр-кликеров").pack(anchor="w", pady=(0, 16))
+        self.root.resizable(True, True)
+        shell = ttk.Frame(self.root, padding=16); shell.pack(fill="both", expand=True)
+        ttk.Label(shell, text="Автокликер", font=("Segoe UI", 20, "bold")).pack(anchor="w")
+        ttk.Label(shell, text="Для Cookie Clicker и других игр-кликеров").pack(anchor="w", pady=(0, 12))
+        # Reserve the footer before allocating the scrollable settings area.
+        # Start/Stop stay visible on small screens and at high Windows DPI.
+        footer = ttk.Frame(shell); footer.pack(side="bottom", fill="x", pady=(12, 0))
+        ttk.Label(footer, textvariable=self.status_var, font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        detail = ttk.Label(footer, textvariable=self.detail_var, wraplength=470)
+        detail.pack(anchor="w", pady=(2, 8))
+        row = ttk.Frame(footer); row.pack(fill="x")
+        self.start_button = ttk.Button(row, text="Запустить  (F6)", command=self.toggle); self.start_button.pack(side="left", fill="x", expand=True)
+        self.stop_button = ttk.Button(row, text="Стоп  (F8)", command=self.stop, state="disabled"); self.stop_button.pack(side="left", padx=(10, 0))
+        shortcut = ttk.Label(footer, text="F6 — старт/пауза  •  F7 — точка  •  F8 — стоп  •  F9 — область", wraplength=470)
+        shortcut.pack(anchor="w", pady=(8, 0))
+        viewport = ttk.Frame(shell); viewport.pack(fill="both", expand=True)
+        self.form_canvas = tk.Canvas(viewport, highlightthickness=0, borderwidth=0, background=self.root.cget("background"))
+        scrollbar = ttk.Scrollbar(viewport, orient="vertical", command=self.form_canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.form_canvas.pack(side="left", fill="both", expand=True)
+        self.form_canvas.configure(yscrollcommand=scrollbar.set)
+        body = ttk.Frame(self.form_canvas, padding=(0, 0, 8, 0))
+        form_id = self.form_canvas.create_window(0, 0, anchor="nw", window=body)
+        body.bind("<Configure>", lambda event: self.form_canvas.configure(scrollregion=self.form_canvas.bbox("all")))
         settings = ttk.LabelFrame(body, text="Настройки", padding=12); settings.pack(fill="x")
         ttk.Label(settings, text="Кликов в секунду").grid(row=0, column=0, sticky="w")
         self.cps = ttk.Spinbox(settings, from_=1, to=100, textvariable=self.cps_var, width=8); self.cps.grid(row=0, column=1, padx=10)
-        for index, value in enumerate((10, 20, 50, 100)):
-            ttk.Button(settings, text=str(value), command=lambda item=value: self.cps_var.set(str(item))).grid(row=0, column=index + 2, padx=2)
+        presets = ttk.Frame(settings); presets.grid(row=0, column=2, sticky="w")
+        self.speed_buttons = []
+        for value in (10, 20, 50, 100):
+            button = ttk.Button(presets, text=str(value), width=4, command=lambda item=value: self.cps_var.set(str(item)))
+            button.pack(side="left", padx=2)
+            self.speed_buttons.append(button)
         ttk.Label(settings, text="Кнопка мыши").grid(row=1, column=0, sticky="w", pady=(12, 0))
         mouse = ttk.Frame(settings); mouse.grid(row=1, column=1, columnspan=4, sticky="w", pady=(12, 0))
         for label, value in (("Левая", "left"), ("Правая", "right"), ("Средняя", "middle")):
@@ -231,21 +255,39 @@ class AutoClickerApp:
         ttk.Radiobutton(target, text="В сохранённую точку", variable=self.target_var, value="fixed").pack(anchor="w", pady=(4, 0))
         self.capture_button = ttk.Button(target, text="Запомнить положение курсора  (F7)", command=self.capture_position); self.capture_button.pack(anchor="w", pady=(8, 3))
         ttk.Label(target, textvariable=self.position_var).pack(anchor="w")
-        golden = ttk.LabelFrame(body, text="Золотые печеньки", padding=12); golden.pack(fill="x", pady=(0, 12))
+        golden = ttk.LabelFrame(body, text="Ловля печенек", padding=12); golden.pack(fill="x")
         self.golden_check = ttk.Checkbutton(
             golden,
             text="Искать и ловить золотые печеньки",
             variable=self.golden_var,
         ); self.golden_check.pack(anchor="w")
+        self.wrath_check = ttk.Checkbutton(golden, text="Искать и ловить злые печеньки (красные)", variable=self.wrath_var)
+        self.wrath_check.pack(anchor="w", pady=(4, 0))
         self.region_button = ttk.Button(golden, text="Выбрать игровую область  (F9)", command=self.capture_region); self.region_button.pack(anchor="w", pady=(8, 3))
-        ttk.Label(golden, textvariable=self.region_var, wraplength=455).pack(anchor="w")
-        ttk.Label(golden, text="Поиск игнорирует знакомые иконки и кликает только по новой круглой золотой цели.", wraplength=455).pack(anchor="w", pady=(5, 0))
-        ttk.Label(body, textvariable=self.status_var, font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(4, 0))
-        ttk.Label(body, textvariable=self.detail_var).pack(anchor="w", pady=(2, 8))
-        row = ttk.Frame(body); row.pack(fill="x")
-        self.start_button = ttk.Button(row, text="Запустить  (F6)", command=self.toggle); self.start_button.pack(side="left", fill="x", expand=True)
-        self.stop_button = ttk.Button(row, text="Стоп  (F8)", command=self.stop, state="disabled"); self.stop_button.pack(side="left", padx=(10, 0))
-        ttk.Label(body, text="F6 — старт/пауза  •  F7 — основное печенье  •  F8 — стоп  •  F9 — область игры").pack(anchor="w", pady=(12, 0))
+        region_label = ttk.Label(golden, textvariable=self.region_var, wraplength=440); region_label.pack(anchor="w")
+        hint = ttk.Label(golden, text="Выберите нужные виды печенек. Поиск запоминает видимые объекты при старте и ловит новые цели.", wraplength=440)
+        hint.pack(anchor="w", pady=(5, 0))
+
+        def resize_form(event: tk.Event) -> None:
+            self.form_canvas.itemconfigure(form_id, width=event.width)
+            for label in (region_label, hint):
+                label.configure(wraplength=max(160, event.width - 40))
+
+        self.form_canvas.bind("<Configure>", resize_form)
+        footer.bind("<Configure>", lambda event: [label.configure(wraplength=max(160, event.width)) for label in (detail, shortcut)])
+
+        def scroll_form(event: tk.Event) -> None:
+            if not isinstance(event.widget, ttk.Spinbox) and body.winfo_height() > self.form_canvas.winfo_height():
+                self.form_canvas.yview_scroll(-int(event.delta / 120), "units")
+
+        self.root.bind("<MouseWheel>", scroll_form)
+        self.root.update_idletasks()
+        width = max(520, body.winfo_reqwidth() + scrollbar.winfo_reqwidth() + 32)
+        height = body.winfo_reqheight() + footer.winfo_reqheight() + 125
+        width = min(width, self.root.winfo_screenwidth() - 80)
+        height = min(height, self.root.winfo_screenheight() - 100)
+        self.root.geometry(f"{width}x{height}")
+        self.root.minsize(width, min(height, footer.winfo_reqheight() + golden.winfo_reqheight() + 145))
 
     def _poll_hotkeys(self) -> None:
         for key, action in ((VK_F6, self.toggle), (VK_F7, self.capture_position), (VK_F8, self.stop), (VK_F9, self.capture_region)):
@@ -282,7 +324,8 @@ class AutoClickerApp:
         self.region_first_corner = None
         region = self.game_region
         self.region_var.set(f"Область: X {region.left}–{region.left + region.width}, Y {region.top}–{region.top + region.height}")
-        self.golden_var.set(True)
+        if not self.golden_var.get() and not self.wrath_var.get():
+            self.golden_var.set(True)
         self.detail_var.set("Область сохранена. Запомните основное печенье F7 и запускайте F6")
 
     def toggle(self) -> None:
@@ -291,7 +334,7 @@ class AutoClickerApp:
     def start(self) -> None:
         try: cps, delay = parse_settings(self.cps_var.get(), self.delay_var.get())
         except ValueError as exc: messagebox.showerror("Проверьте настройки", str(exc), parent=self.root); return
-        golden_enabled = self.golden_var.get()
+        golden_enabled = self.golden_var.get() or self.wrath_var.get()
         if golden_enabled:
             dependency_error = missing_dependencies()
             if dependency_error:
@@ -341,9 +384,10 @@ class AutoClickerApp:
             catch,
             self.golden_events,
             session_id=self._golden_session,
+            finder=GoldenCookieFinder(include_golden=self.golden_var.get(), include_wrath=self.wrath_var.get()),
         )
         if self.golden_watcher.start():
-            self.detail_var.set(f"{config.cps:g} кликов/с. Поиск золотых печенек калибруется…")
+            self.detail_var.set(f"{config.cps:g} кликов/с. Поиск печенек калибруется…")
 
     def _poll_golden_events(self) -> None:
         while True:
@@ -353,9 +397,10 @@ class AutoClickerApp:
                 break
             if session_id != self._golden_session:
                 continue
-            if name == "golden-caught":
+            if name in ("golden-caught", "wrath-caught"):
                 x, y = payload
-                self.detail_var.set(f"Золотая печенька поймана: X {x}, Y {y}. Основное печенье продолжает кликаться.")
+                label = "Злая" if name == "wrath-caught" else "Золотая"
+                self.detail_var.set(f"{label} печенька поймана: X {x}, Y {y}. Обычные клики продолжаются.")
             elif name == "golden-error":
                 self.golden_watcher = None
                 if self.engine.running:
@@ -379,10 +424,13 @@ class AutoClickerApp:
     def _set_controls(self, enabled: bool) -> None:
         state = "normal" if enabled else "disabled"
         self.cps.configure(state=state); self.delay.configure(state=state); self.capture_button.configure(state=state)
-        self.golden_check.configure(state=state); self.region_button.configure(state=state)
+        self.golden_check.configure(state=state); self.wrath_check.configure(state=state); self.region_button.configure(state=state)
 
     def close(self) -> None:
-        self.stop(); self.root.destroy()
+        self.stop()
+        for callback in self.root.tk.call("after", "info"):
+            self.root.after_cancel(callback)
+        self.root.destroy()
 
 
 def main(argv: list[str] | None = None) -> int:

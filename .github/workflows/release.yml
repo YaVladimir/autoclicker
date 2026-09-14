@@ -38,6 +38,9 @@ jobs:
       - name: Install Windows dependencies
         if: runner.os == 'Windows'
         run: python -m pip install -r requirements-windows.txt
+      - name: Test Windows detector and click engine
+        if: runner.os == 'Windows'
+        run: python -m unittest discover -s tests -v
       - name: Build application
         run: pyinstaller --noconfirm ${{ matrix.spec }}
       - name: Verify Windows application
@@ -71,5 +74,6 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          draft: true
           generate_release_notes: true
           files: release-files/*

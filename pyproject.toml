@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cookie-clicker-autoclicker"
-version = "1.0.2"
+version = "1.1.0"
 description = "A small desktop autoclicker for Cookie Clicker and other clicker games"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -35,4 +35,8 @@ macos = [
 cookie-clicker-autoclicker-macos = "autoclicker_macos:main"
 
 [tool.setuptools]
+packages = ["golden_cookie_assets"]
 py-modules = ["autoclicker", "autoclicker_macos", "golden_cookie_detector", "macos_cocoa_ui"]
+
+[tool.setuptools.package-data]
+golden_cookie_assets = ["*.png"]
