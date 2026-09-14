@@ -26,8 +26,8 @@ jobs:
             spec: build_windows.spec
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install packaging dependencies
@@ -35,13 +35,28 @@ jobs:
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: python -m pip install -r requirements-macos.txt
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        run: python -m pip install -r requirements-windows.txt
+      - name: Test Windows detector and click engine
+        if: runner.os == 'Windows'
+        run: python -m unittest discover -s tests -v
       - name: Build application
         run: pyinstaller --noconfirm ${{ matrix.spec }}
+      - name: Verify Windows application
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:AUTOCLICKER_SELF_CHECK_REPORT = Join-Path $env:RUNNER_TEMP "autoclicker-self-check.txt"
+          $dependencyCheck = Start-Process -FilePath "dist\Автокликер.exe" -ArgumentList "--check-golden-detector" -WindowStyle Hidden -Wait -PassThru
+          if ($dependencyCheck.ExitCode -ne 0) { throw "Golden-cookie detector self-check failed: $(Get-Content $env:AUTOCLICKER_SELF_CHECK_REPORT -Raw)" }
+          $windowSmoke = Start-Process -FilePath "dist\Автокликер.exe" -ArgumentList "--smoke-test" -WindowStyle Hidden -Wait -PassThru
+          if ($windowSmoke.ExitCode -ne 0) { throw "Windows GUI smoke test failed." }
       - name: Package macOS app
         if: runner.os == 'macOS'
         run: ditto -c -k --sequesterRsrc --keepParent dist/Автокликер.app dist/Автокликер-macOS.zip
       - name: Upload build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: ${{ runner.os == 'macOS' && 'dist/Автокликер-macOS.zip' || 'dist/Автокликер.exe' }}
@@ -52,12 +67,13 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: release-files
           merge-multiple: true
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          draft: true
           generate_release_notes: true
           files: release-files/*
