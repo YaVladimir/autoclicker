@@ -46,8 +46,14 @@ class WindowsLayoutTests(unittest.TestCase):
                     self.assertFalse(app.capture_button.winfo_ismapped())
                     for widget in (*app.speed_buttons, app.start_button, app.stop_button):
                         self.assert_inside(widget, root)
-                    if scale == 1.0:
+                    if app.settings_pane.content.winfo_height() <= app.form_canvas.winfo_height():
                         self.assertEqual(app.form_canvas.yview(), (0.0, 1.0))
+                    else:
+                        # Hosted Windows desktops can cap even a 100% window.
+                        app.form_canvas.yview_moveto(1)
+                        root.update()
+                        self.assert_inside(app.cookie_summary, app.form_canvas)
+                        app.form_canvas.yview_moveto(0)
                     app._toggle_cookies()
                     app.target_fixed.invoke()
                     root.geometry("420x480")
@@ -56,8 +62,14 @@ class WindowsLayoutTests(unittest.TestCase):
                     self.assert_inside(app.stop_button, root)
                     app.form_canvas.yview_moveto(1)
                     root.update()
-                    self.assert_inside(app.region_button, app.form_canvas)
                     self.assert_inside(app.cookie_hint, app.form_canvas)
+                    # On a short display at 200%, the button and hint need not
+                    # fit together. Keyboard focus must reveal the button.
+                    app.settings_pane._focus_changed(SimpleNamespace(widget=app.region_button))
+                    root.update()
+                    self.assert_inside(app.region_button, app.form_canvas)
+                    self.assert_inside(app.start_button, root)
+                    self.assert_inside(app.stop_button, root)
                     app._toggle_cookies()
                     app.target_cursor.invoke()
                     root.geometry("480x850")
