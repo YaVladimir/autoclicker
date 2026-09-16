@@ -18,3 +18,5 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install -r requirements-windows.txt
       - run: python -m unittest discover -s tests -v
+        env:
+          RUN_WINDOWS_UI_SMOKE: ${{ runner.os == 'Windows' && '1' || '0' }}
