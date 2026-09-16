@@ -160,12 +160,53 @@ class WindowsLayoutTests(unittest.TestCase):
         finally:
             app.close()
 
+    def test_button_resume_waits_and_cookie_search_allows_cursor_mode(self):
+        import autoclicker
+
+        class Engine:
+            running = False
+
+            def start(self, config):
+                self.config, self.running = config, True
+                return True
+
+            def stop(self):
+                self.running = False
+
+        root, app = self.make_app()
+        app.engine = Engine()
+        try:
+            app.toggle()
+            app.toggle()
+            self.assertIsNotNone(app.paused_config)
+            app.start_button.invoke()
+            self.assertIsNotNone(app.countdown_id)
+            self.assertFalse(app.engine.running)
+            app.start_button.invoke()
+
+            app.game_region = autoclicker.ScreenRegion(0, 0, 800, 600)
+            app.golden_var.set(True)
+            app.target_cursor.invoke()
+            with (
+                patch.object(autoclicker, "missing_dependencies", return_value=None),
+                patch.object(app, "_start_golden_watcher") as start_watcher,
+            ):
+                app.start()
+            self.assertTrue(app.engine.running)
+            self.assertIsNone(app.engine.config.fixed_position)
+            start_watcher.assert_called_once_with(app.engine.config)
+        finally:
+            app.close()
+
     def test_screen_selection_and_wrath_only_watcher(self):
         import autoclicker
         root, app = self.make_app()
         try:
             app.capture_position()
             root.update()
+            app.toggle()
+            self.assertFalse(app.engine.running)
+            self.assertIsNotNone(app.selection_overlay)
             with patch.object(app, "_cursor_position", return_value=(-250, 400)):
                 app._selection_press(SimpleNamespace(x=10, y=10))
             self.assertEqual(app.fixed_position, (-250, 400))
