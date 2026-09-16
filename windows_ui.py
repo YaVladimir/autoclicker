@@ -207,7 +207,7 @@ class WindowsInterface:
         self.region_button.grid(row=2, column=0, sticky="ew")
         self.region_label = self._label(self.cookie_body, variable=self.region_var, size=12, muted=True)
         self.region_label.grid(row=3, column=0, sticky="ew", pady=(6, 0))
-        self.cookie_hint = self._label(self.cookie_body, "Выберите основное печенье клавишей F7: после сбора курсор вернётся к нему.", size=12, muted=True)
+        self.cookie_hint = self._label(self.cookie_body, "После сбора курсор вернётся на прежнее место или в точку, выбранную F7.", size=12, muted=True)
         self.cookie_hint.grid(row=4, column=0, sticky="ew", pady=(8, 0))
 
         footer = ctk.CTkFrame(self.root, fg_color=PANEL, corner_radius=0)
