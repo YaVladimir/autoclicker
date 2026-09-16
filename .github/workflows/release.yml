@@ -43,6 +43,11 @@ jobs:
         env:
           RUN_WINDOWS_UI_SMOKE: "1"
         run: python -m unittest discover -s tests -v
+      - name: Test macOS controller and native imports
+        if: runner.os == 'macOS'
+        run: |
+          python -m unittest tests.test_macos_core tests.test_macos_controller -v
+          python -c "import macos_cocoa_ui"
       - name: Build application
         run: pyinstaller --noconfirm ${{ matrix.spec }}
       - name: Verify Windows application

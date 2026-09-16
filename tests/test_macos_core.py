@@ -12,7 +12,8 @@ from unittest.mock import patch
 
 # The functions under test do not call Quartz. A small placeholder keeps the
 # tests portable, including on Linux in GitHub Actions.
-sys.modules.setdefault("Quartz", types.SimpleNamespace())
+if sys.platform != "darwin":
+    sys.modules.setdefault("Quartz", types.SimpleNamespace())
 
 import autoclicker_macos as app  # noqa: E402
 
@@ -62,6 +63,41 @@ class SettingsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(app, "SETTINGS_PATH", Path(directory) / "settings.json"):
                 self.assertEqual(app.load_click_preferences(), app.DEFAULT_CLICK_PREFERENCES)
+
+
+class AppearanceTests(unittest.TestCase):
+    def test_appearance_preserves_hotkeys_and_click_preferences(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(app, "SETTINGS_PATH", Path(directory) / "settings.json"):
+                app.save_hotkeys(app.DEFAULT_HOTKEYS)
+                app.save_click_preferences("25", "1,5", "right")
+                app.save_appearance("Тёмная", "Зелёный")
+                self.assertEqual(app.load_appearance(), {"theme": "Тёмная", "accent": "Зелёный"})
+                self.assertEqual(app.load_hotkeys(), app.DEFAULT_HOTKEYS)
+                self.assertEqual(app.load_click_preferences()["delay"], "1.5")
+                app.save_click_preferences("50", "0", "left")
+                self.assertEqual(app.load_appearance()["theme"], "Тёмная")
+
+    def test_invalid_appearance_falls_back_per_field(self):
+        for saved in (None, [], {"theme": [], "accent": "Зелёный"}):
+            with self.subTest(saved=saved), patch.object(app, "_load_settings", return_value={"appearance": saved}):
+                self.assertEqual(app.load_appearance()["theme"], "Системная")
+        with patch.object(app, "_save_settings") as save:
+            with self.assertRaises(ValueError):
+                app.save_appearance("unknown", "Синий")
+            save.assert_not_called()
+
+
+class CoordinatesTests(unittest.TestCase):
+    def test_desktop_coordinates_use_points_on_all_sides_of_primary_display(self):
+        for source, expected in (
+            ((100, 800), (100, 100)),
+            ((-400, 200), (-400, 700)),
+            ((1600, 1000), (1600, -100)),
+            ((20.5, -300.5), (20.5, 1200.5)),
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(app.cocoa_to_quartz(*source, 900), expected)
 
 
 class ClickEngineTests(unittest.TestCase):

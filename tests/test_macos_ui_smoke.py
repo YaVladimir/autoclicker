@@ -48,7 +48,62 @@ class CocoaUiSmokeTests(unittest.TestCase):
     def test_default_values_are_rendered(self) -> None:
         self.assertEqual(self.controller.cps_field.stringValue(), "100")
         self.assertEqual(self.controller.delay_field.stringValue(), "0")
-        self.assertEqual(self.controller.target_popup.indexOfSelectedItem(), 0)
+        self.assertEqual(self.controller.target_popup.selectedSegment(), 0)
+        self.assertEqual(self.controller.button_popup.selectedSegment(), 0)
+        self.assertEqual(self.controller.speed_slider.doubleValue(), 100)
+
+    def test_footer_stays_visible_when_window_is_resized(self):
+        app = self.controller
+        self.assertTrue(app.window.styleMask() & self.appkit.NSWindowStyleMaskResizable)
+        for width, height in ((580, 360), (600, 650), (900, 780)):
+            with self.subTest(size=(width, height)):
+                app.window.setContentSize_((width, height))
+                app._layout()
+                bounds = app.footer.bounds()
+                for control in (app.start_button, app.stop_button, app.status_detail_label):
+                    self.assertTrue(self.appkit.NSContainsRect(bounds, control.frame()))
+                self.assertEqual(app.footer.frame().origin.y, 0)
+                self.assertGreaterEqual(app.scroll_view.frame().origin.y, 150)
+                for control in app.content.subviews():
+                    self.assertTrue(self.appkit.NSContainsRect(app.content.bounds(), control.frame()))
+
+    def test_presets_and_slider_stay_in_sync(self):
+        app = self.controller
+        app.setSpeed_(app.speed_presets[1])
+        self.assertEqual(app.cps_field.stringValue(), "20")
+        self.assertEqual(app.speed_slider.doubleValue(), 20)
+        app.speed_slider.setDoubleValue_(45)
+        app.slideSpeed_(app.speed_slider)
+        self.assertEqual(app.cps_field.stringValue(), "45")
+
+    def test_appearance_switches_without_rebuilding_window(self):
+        app = self.controller
+        for theme, name in (("Светлая", self.appkit.NSAppearanceNameAqua), ("Тёмная", self.appkit.NSAppearanceNameDarkAqua)):
+            for accent in ("Синий", "Фиолетовый", "Зелёный"):
+                app.appearance = {"theme": theme, "accent": accent}
+                app._apply_appearance()
+                self.assertEqual(app.window.appearance().name(), name)
+                self.assertTrue(app.window.isVisible())
+        app.appearance["theme"] = "Системная"
+        app._apply_appearance()
+        self.assertIsNone(app.window.appearance())
+
+    def test_point_selection_can_be_cancelled_without_input_permissions(self):
+        app = self.controller
+        app.fixed_position = (40, 60)
+        app.capturePosition_(None)
+        try:
+            self.assertEqual(len(app.selection_windows), len(self.appkit.NSScreen.screens()))
+            self.assertFalse(app.window.isVisible())
+            for window in app.selection_windows:
+                self.assertTrue(window.isVisible())
+                self.assertTrue(window.canBecomeKeyWindow())
+            app._cancel_point_selection()
+            self.assertTrue(app.window.isVisible())
+            self.assertEqual(app.fixed_position, (40, 60))
+            self.assertEqual(app.selection_windows, [])
+        finally:
+            app._stop_all()
 
     def test_starts_at_100_clicks_per_second_without_delay(self) -> None:
         class FakeEngine:

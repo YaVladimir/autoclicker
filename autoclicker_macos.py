@@ -32,6 +32,9 @@ KEY_NAMES = {
 HOTKEY_ACTIONS = (("toggle", "Старт / пауза"), ("capture", "Запомнить точку"), ("stop", "Остановить всё"))
 DEFAULT_HOTKEYS = {"toggle": 97, "capture": 98, "stop": 100}
 DEFAULT_CLICK_PREFERENCES = {"cps": "100", "delay": "0", "mouse_button": "left"}
+THEMES = ("Системная", "Светлая", "Тёмная")
+ACCENTS = ("Синий", "Фиолетовый", "Зелёный")
+DEFAULT_APPEARANCE = {"theme": THEMES[0], "accent": ACCENTS[0]}
 # The application bundle is read-only after installation, so settings belong in
 # the user's standard Application Support directory rather than beside the code.
 SETTINGS_PATH = Path.home() / "Library" / "Application Support" / "Autoclicker" / "settings.json"
@@ -75,6 +78,29 @@ def save_hotkeys(hotkeys: dict[str, int]) -> None:
     settings = _load_settings()
     settings.update({"version": 2, "hotkeys": hotkeys})
     _save_settings(settings)
+
+
+def load_appearance() -> dict[str, str]:
+    saved = _load_settings().get("appearance")
+    result = DEFAULT_APPEARANCE.copy()
+    if isinstance(saved, dict):
+        for key, choices in (("theme", THEMES), ("accent", ACCENTS)):
+            if saved.get(key) in choices:
+                result[key] = saved[key]
+    return result
+
+
+def save_appearance(theme: str, accent: str) -> None:
+    if theme not in THEMES or accent not in ACCENTS:
+        raise ValueError("Неизвестная тема или акцентный цвет.")
+    settings = _load_settings()
+    settings["appearance"] = {"theme": theme, "accent": accent}
+    _save_settings(settings)
+
+
+def cocoa_to_quartz(x: float, y: float, primary_height: float) -> tuple[float, float]:
+    """Convert desktop points, not Retina pixels, including secondary displays."""
+    return x, primary_height - y
 
 
 @dataclass(frozen=True)

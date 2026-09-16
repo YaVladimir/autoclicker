@@ -41,11 +41,12 @@ exe = EXE(
 app = BUNDLE(
     exe,
     name="Автокликер.app",
+    icon="assets/autoclicker-icon.icns",
     bundle_identifier="io.github.yavladimir.autoclicker",
     info_plist={
         "CFBundleDisplayName": "Автокликер",
-        "CFBundleShortVersionString": "1.1.0",
-        "CFBundleVersion": "1.1.0",
+        "CFBundleShortVersionString": "1.2.0",
+        "CFBundleVersion": "1.2.0",
         "NSAppleEventsUsageDescription": "Автокликер отправляет клики только по команде пользователя.",
     },
 )
