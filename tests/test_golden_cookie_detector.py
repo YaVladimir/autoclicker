@@ -334,6 +334,14 @@ class RealImageDetectionTests(unittest.TestCase):
     def test_packaged_dependency_self_check(self) -> None:
         self.assertIsNone(detector_self_check())
 
+    def test_overlapping_cookie_without_cpu_optimizations(self) -> None:
+        # The generic OpenCV backend reproduces the macOS ARM failure at
+        # 150% scale even on Windows. Restore global state for later tests.
+        optimized = cv2.useOptimized()
+        self.addCleanup(cv2.setUseOptimized, optimized)
+        cv2.setUseOptimized(False)
+        self.test_cookie_over_buildings_border_and_icons_at_common_scales()
+
 
 class WatcherIntegrationTests(unittest.TestCase):
     def test_slow_first_frame_is_still_calibrated(self) -> None:

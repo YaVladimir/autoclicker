@@ -228,11 +228,11 @@ class GoldenCookieFinder:
         if scale < 1:
             gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
         candidates = []
-        # Wrath cookies have a textured edge against similarly red backgrounds.
-        # A single smoothing scale can erase part of that edge. Propose circles
-        # from both fine and smoothed edges; colour and artwork still decide
-        # whether a candidate can be clicked.
-        for kernel_size in ((3, 5) if textured_red else (5,)):
+        # A single smoothing scale can erase a cookie edge against textured
+        # backgrounds, with results varying between OpenCV CPU backends.
+        # Propose both fine and smoothed edges for golden and wrath cookies;
+        # colour and artwork still decide whether a candidate can be clicked.
+        for kernel_size in ((3, 5) if textured_red else (5, 3)):
             smoothed = cv2.GaussianBlur(gray, (kernel_size, kernel_size), 1)
             circles = cv2.HoughCircles(
                 smoothed, cv2.HOUGH_GRADIENT_ALT, dp=1.5, minDist=15,
