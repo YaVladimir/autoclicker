@@ -114,7 +114,7 @@ py -3 -m pip install -r requirements-build.txt -r requirements-windows.txt
 pyinstaller --noconfirm build_windows.spec
 ```
 
-Готовые файлы будут в папке `dist/`. При отправке тега вида `v1.1.0` GitHub
+Готовые файлы будут в папке `dist/`. При отправке тега вида `v1.2.0` GitHub
 соберёт оба варианта и создаст черновик релиза автоматически.
 
 ## Установка для разработки
