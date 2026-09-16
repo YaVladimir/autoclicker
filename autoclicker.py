@@ -141,9 +141,14 @@ def send_mouse_click(button: str, position: tuple[int, int] | None) -> None:
         _emit_mouse_click(button)
 
 
-def click_then_restore(button: str, target: tuple[int, int], restore: tuple[int, int]) -> None:
-    """Click a transient target and leave the pointer on the main cookie."""
+def click_then_restore(button: str, target: tuple[int, int], restore: tuple[int, int] | None) -> None:
+    """Click a transient target and restore the fixed or current pointer position."""
     with MOUSE_LOCK:
+        if restore is None:
+            point = POINT()
+            if not user32.GetCursorPos(ctypes.byref(point)):
+                return
+            restore = (point.x, point.y)
         user32.SetCursorPos(*target)
         try:
             _emit_mouse_click(button)
@@ -151,9 +156,14 @@ def click_then_restore(button: str, target: tuple[int, int], restore: tuple[int,
             user32.SetCursorPos(*restore)
 
 
-def click_golden_cookie(target: tuple[int, int], restore: tuple[int, int]) -> None:
+def click_golden_cookie(target: tuple[int, int], restore: tuple[int, int] | None) -> None:
     """Golden cookies always require a normal left click."""
     click_then_restore("left", target, restore)
+
+
+def virtual_screen_geometry(left: int, top: int, width: int, height: int) -> str:
+    """Build an absolute Tk geometry, including virtual desktops with negative origins."""
+    return f"{width}x{height}+{left}+{top}"
 
 
 class ClickEngine:
@@ -271,7 +281,7 @@ class AutoClickerApp(WindowsInterface):
         self.root.withdraw()
         overlay = tk.Toplevel(self.root)
         overlay.overrideredirect(True)
-        overlay.geometry(f"{width}x{height}{left:+d}{top:+d}")
+        overlay.geometry(virtual_screen_geometry(left, top, width, height))
         overlay.attributes("-topmost", True)
         overlay.attributes("-alpha", 0.22)
         canvas = tk.Canvas(overlay, background="#101828", highlightthickness=0, cursor="crosshair")
@@ -334,7 +344,7 @@ class AutoClickerApp(WindowsInterface):
         self.region_var.set(f"Область: X {region.left}–{region.left + region.width}, Y {region.top}–{region.top + region.height}")
         if not self.golden_var.get() and not self.wrath_var.get():
             self.golden_var.set(True)
-        self.detail_var.set("Область выбрана. Выберите основную точку и запускайте")
+        self.detail_var.set("Область выбрана. Наведите курсор на цель и нажмите F6")
         self._finish_selection()
 
     def _cancel_selection(self, _event: tk.Event | None = None) -> None:
@@ -354,12 +364,17 @@ class AutoClickerApp(WindowsInterface):
         self.root.focus_force()
 
     def toggle(self, *, from_button: bool = False) -> None:
+        if self.selection_overlay:
+            return
         if self.engine.running:
             self.pause()
         elif self.countdown_id:
             self.stop()
         elif self.paused_config:
-            self._begin(self.paused_config)
+            if from_button and self.paused_config.fixed_position is None:
+                self._countdown(self.paused_config, 3)
+            else:
+                self._begin(self.paused_config)
         else:
             self.start(from_button=from_button)
 
@@ -375,10 +390,6 @@ class AutoClickerApp(WindowsInterface):
             if self.game_region is None:
                 messagebox.showwarning("Не выбрана область", "Нажмите F9 или «Выбрать игровую область» и обведите игровое поле мышью.", parent=self.root)
                 return
-            if self.fixed_position is None:
-                messagebox.showwarning("Не выбрано основное печенье", "Наведите курсор на основное печенье и нажмите F7. После ловли курсор вернётся в эту точку.", parent=self.root)
-                return
-            self.target_var.set("fixed")
         position = self.fixed_position if self.target_var.get() == "fixed" else None
         if self.target_var.get() == "fixed" and position is None:
             messagebox.showwarning("Не выбрана точка", "Сначала сохраните точку кнопкой F7.", parent=self.root); return
@@ -408,7 +419,7 @@ class AutoClickerApp(WindowsInterface):
                 self._start_golden_watcher(config)
 
     def _start_golden_watcher(self, config: ClickConfig) -> None:
-        if self.game_region is None or config.fixed_position is None:
+        if self.game_region is None:
             return
 
         def catch(point: tuple[int, int]) -> None:
