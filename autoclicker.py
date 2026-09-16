@@ -12,7 +12,10 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox
+
+import customtkinter as ctk
+from windows_ui import WindowsInterface
 from typing import Callable
 
 from golden_cookie_detector import GoldenCookieFinder, GoldenCookieWatcher, ScreenRegion, detector_self_check, missing_dependencies
@@ -44,6 +47,8 @@ class POINT(ctypes.Structure):
 INPUT_MOUSE = 0
 MOUSE_FLAGS = {"left": (0x0002, 0x0004), "right": (0x0008, 0x0010), "middle": (0x0020, 0x0040)}
 VK_F6, VK_F7, VK_F8, VK_F9 = 0x75, 0x76, 0x77, 0x78
+SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN = 76, 77
+SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
 DEFAULT_CLICK_PREFERENCES = {"cps": "100", "delay": "0", "mouse_button": "left"}
 SETTINGS_PATH = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "Autoclicker" / "settings.json"
 MOUSE_LOCK = threading.Lock()
@@ -52,6 +57,7 @@ user32.SendInput.argtypes = (ctypes.c_uint, ctypes.POINTER(INPUT), ctypes.c_int)
 user32.GetCursorPos.argtypes = (ctypes.POINTER(POINT),)
 user32.SetCursorPos.argtypes = (ctypes.c_int, ctypes.c_int)
 user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
+user32.GetSystemMetrics.argtypes = (ctypes.c_int,)
 
 
 def _enable_dpi_awareness() -> None:
@@ -66,6 +72,12 @@ def _enable_dpi_awareness() -> None:
 
 
 _enable_dpi_awareness()
+
+
+def resource_path(relative_path: str) -> Path:
+    """Resolve bundled assets as well as files next to the source tree."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / relative_path
 
 
 @dataclass(frozen=True)
@@ -181,17 +193,23 @@ class ClickEngine:
             self._stop_event.wait(max(0, next_click - now))
 
 
-class AutoClickerApp:
+class AutoClickerApp(WindowsInterface):
     def __init__(self, root: tk.Tk, *, enable_hotkeys: bool = True):
         self.root, self.engine = root, ClickEngine(send_mouse_click)
         self.fixed_position: tuple[int, int] | None = None
         self.game_region: ScreenRegion | None = None
-        self.region_first_corner: tuple[int, int] | None = None
         self.golden_watcher: GoldenCookieWatcher | None = None
         self.golden_events: queue.SimpleQueue[tuple[int, str, object]] = queue.SimpleQueue()
         self._golden_session = 0
         self._golden_pending = False
         self.countdown_id: str | None = None
+        self.active_config: ClickConfig | None = None
+        self.paused_config: ClickConfig | None = None
+        self.selection_overlay: tk.Toplevel | None = None
+        self.selection_canvas: tk.Canvas | None = None
+        self.selection_mode: str | None = None
+        self.selection_start: tuple[int, int] | None = None
+        self.selection_rect: int | None = None
         self.key_state = {key: False for key in (VK_F6, VK_F7, VK_F8, VK_F9)}
         self.click_preferences = load_click_preferences()
         self.cps_var = tk.StringVar(value=self.click_preferences["cps"])
@@ -210,84 +228,18 @@ class AutoClickerApp:
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _build(self) -> None:
-        self.root.title("Автокликер")
-        self.root.resizable(True, True)
-        shell = ttk.Frame(self.root, padding=16); shell.pack(fill="both", expand=True)
-        ttk.Label(shell, text="Автокликер", font=("Segoe UI", 20, "bold")).pack(anchor="w")
-        ttk.Label(shell, text="Для Cookie Clicker и других игр-кликеров").pack(anchor="w", pady=(0, 12))
-        # Reserve the footer before allocating the scrollable settings area.
-        # Start/Stop stay visible on small screens and at high Windows DPI.
-        footer = ttk.Frame(shell); footer.pack(side="bottom", fill="x", pady=(12, 0))
-        ttk.Label(footer, textvariable=self.status_var, font=("Segoe UI", 12, "bold")).pack(anchor="w")
-        detail = ttk.Label(footer, textvariable=self.detail_var, wraplength=470)
-        detail.pack(anchor="w", pady=(2, 8))
-        row = ttk.Frame(footer); row.pack(fill="x")
-        self.start_button = ttk.Button(row, text="Запустить  (F6)", command=self.toggle); self.start_button.pack(side="left", fill="x", expand=True)
-        self.stop_button = ttk.Button(row, text="Стоп  (F8)", command=self.stop, state="disabled"); self.stop_button.pack(side="left", padx=(10, 0))
-        shortcut = ttk.Label(footer, text="F6 — старт/пауза  •  F7 — точка  •  F8 — стоп  •  F9 — область", wraplength=470)
-        shortcut.pack(anchor="w", pady=(8, 0))
-        viewport = ttk.Frame(shell); viewport.pack(fill="both", expand=True)
-        self.form_canvas = tk.Canvas(viewport, highlightthickness=0, borderwidth=0, background=self.root.cget("background"))
-        scrollbar = ttk.Scrollbar(viewport, orient="vertical", command=self.form_canvas.yview)
-        scrollbar.pack(side="right", fill="y")
-        self.form_canvas.pack(side="left", fill="both", expand=True)
-        self.form_canvas.configure(yscrollcommand=scrollbar.set)
-        body = ttk.Frame(self.form_canvas, padding=(0, 0, 8, 0))
-        form_id = self.form_canvas.create_window(0, 0, anchor="nw", window=body)
-        body.bind("<Configure>", lambda event: self.form_canvas.configure(scrollregion=self.form_canvas.bbox("all")))
-        settings = ttk.LabelFrame(body, text="Настройки", padding=12); settings.pack(fill="x")
-        ttk.Label(settings, text="Кликов в секунду").grid(row=0, column=0, sticky="w")
-        self.cps = ttk.Spinbox(settings, from_=1, to=100, textvariable=self.cps_var, width=8); self.cps.grid(row=0, column=1, padx=10)
-        presets = ttk.Frame(settings); presets.grid(row=0, column=2, sticky="w")
-        self.speed_buttons = []
-        for value in (10, 20, 50, 100):
-            button = ttk.Button(presets, text=str(value), width=4, command=lambda item=value: self.cps_var.set(str(item)))
-            button.pack(side="left", padx=2)
-            self.speed_buttons.append(button)
-        ttk.Label(settings, text="Кнопка мыши").grid(row=1, column=0, sticky="w", pady=(12, 0))
-        mouse = ttk.Frame(settings); mouse.grid(row=1, column=1, columnspan=4, sticky="w", pady=(12, 0))
-        for label, value in (("Левая", "left"), ("Правая", "right"), ("Средняя", "middle")):
-            ttk.Radiobutton(mouse, text=label, variable=self.button_var, value=value).pack(side="left", padx=(0, 10))
-        ttk.Label(settings, text="Задержка, сек.").grid(row=2, column=0, sticky="w", pady=(12, 0))
-        self.delay = ttk.Spinbox(settings, from_=0, to=10, increment=.5, textvariable=self.delay_var, width=8); self.delay.grid(row=2, column=1, padx=10, pady=(12, 0))
-        target = ttk.LabelFrame(body, text="Куда кликать", padding=12); target.pack(fill="x", pady=12)
-        ttk.Radiobutton(target, text="Под текущим курсором", variable=self.target_var, value="cursor").pack(anchor="w")
-        ttk.Radiobutton(target, text="В сохранённую точку", variable=self.target_var, value="fixed").pack(anchor="w", pady=(4, 0))
-        self.capture_button = ttk.Button(target, text="Запомнить положение курсора  (F7)", command=self.capture_position); self.capture_button.pack(anchor="w", pady=(8, 3))
-        ttk.Label(target, textvariable=self.position_var).pack(anchor="w")
-        golden = ttk.LabelFrame(body, text="Ловля печенек", padding=12); golden.pack(fill="x")
-        self.golden_check = ttk.Checkbutton(
-            golden,
-            text="Искать и ловить золотые печеньки",
-            variable=self.golden_var,
-        ); self.golden_check.pack(anchor="w")
-        self.wrath_check = ttk.Checkbutton(golden, text="Искать и ловить злые печеньки (красные)", variable=self.wrath_var)
-        self.wrath_check.pack(anchor="w", pady=(4, 0))
-        self.region_button = ttk.Button(golden, text="Выбрать игровую область  (F9)", command=self.capture_region); self.region_button.pack(anchor="w", pady=(8, 3))
-        region_label = ttk.Label(golden, textvariable=self.region_var, wraplength=440); region_label.pack(anchor="w")
-        hint = ttk.Label(golden, text="Выберите нужные виды печенек. Поиск запоминает видимые объекты при старте и ловит новые цели.", wraplength=440)
-        hint.pack(anchor="w", pady=(5, 0))
+        self.appearance_path = SETTINGS_PATH.with_name("appearance.json")
+        super()._build()
 
-        def resize_form(event: tk.Event) -> None:
-            self.form_canvas.itemconfigure(form_id, width=event.width)
-            for label in (region_label, hint):
-                label.configure(wraplength=max(160, event.width - 40))
+        def set_icon() -> None:
+            try:
+                self.root.iconbitmap(resource_path("assets/autoclicker-icon.ico"))
+            except tk.TclError:
+                pass
 
-        self.form_canvas.bind("<Configure>", resize_form)
-        footer.bind("<Configure>", lambda event: [label.configure(wraplength=max(160, event.width)) for label in (detail, shortcut)])
-
-        def scroll_form(event: tk.Event) -> None:
-            if not isinstance(event.widget, ttk.Spinbox) and body.winfo_height() > self.form_canvas.winfo_height():
-                self.form_canvas.yview_scroll(-int(event.delta / 120), "units")
-
-        self.root.bind("<MouseWheel>", scroll_form)
-        self.root.update_idletasks()
-        width = max(520, body.winfo_reqwidth() + scrollbar.winfo_reqwidth() + 32)
-        height = body.winfo_reqheight() + footer.winfo_reqheight() + 125
-        width = min(width, self.root.winfo_screenwidth() - 80)
-        height = min(height, self.root.winfo_screenheight() - 100)
-        self.root.geometry(f"{width}x{height}")
-        self.root.minsize(width, min(height, footer.winfo_reqheight() + golden.winfo_reqheight() + 145))
+        set_icon()
+        # CTk installs its own default icon shortly after creating the root.
+        self.root.after(300, set_icon)
 
     def _poll_hotkeys(self) -> None:
         for key, action in ((VK_F6, self.toggle), (VK_F7, self.capture_position), (VK_F8, self.stop), (VK_F9, self.capture_region)):
@@ -298,40 +250,120 @@ class AutoClickerApp:
         self.root.after(30, self._poll_hotkeys)
 
     def capture_position(self) -> None:
-        if self.engine.running or self.countdown_id: return
-        point = POINT()
-        if user32.GetCursorPos(ctypes.byref(point)):
-            self.fixed_position = (point.x, point.y); self.target_var.set("fixed")
-            self.position_var.set(f"Сохранено: X {point.x}, Y {point.y}")
+        if self.engine.running or self.countdown_id or self.selection_overlay:
+            return
+        self._begin_selection("point")
 
     def capture_region(self) -> None:
-        if self.engine.running or self.countdown_id:
+        if self.engine.running or self.countdown_id or self.selection_overlay:
             return
+        self._begin_selection("region")
+
+    def _begin_selection(self, mode: str) -> None:
+        """Use a full-screen capture layer so a toolbar click cannot become the target."""
+        left = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+        top = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+        width = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+        height = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+        self.selection_mode = mode
+        self.selection_start = None
+        self.selection_rect = None
+        self.root.withdraw()
+        overlay = tk.Toplevel(self.root)
+        overlay.overrideredirect(True)
+        overlay.geometry(f"{width}x{height}{left:+d}{top:+d}")
+        overlay.attributes("-topmost", True)
+        overlay.attributes("-alpha", 0.22)
+        canvas = tk.Canvas(overlay, background="#101828", highlightthickness=0, cursor="crosshair")
+        canvas.pack(fill="both", expand=True)
+        prompt = "Щёлкните по цели для кликов. Esc — отмена" if mode == "point" else "Потяните рамку вокруг игровой области. Esc — отмена"
+        canvas.create_text(24, 24, anchor="nw", text=prompt, fill="white", font=("Segoe UI", 14, "bold"))
+        canvas.bind("<Button-1>", self._selection_press)
+        canvas.bind("<B1-Motion>", self._selection_drag)
+        canvas.bind("<ButtonRelease-1>", self._selection_release)
+        overlay.bind("<Escape>", self._cancel_selection)
+        self.selection_overlay, self.selection_canvas = overlay, canvas
+        overlay.after(80, overlay.focus_force)
+
+    def _cursor_position(self) -> tuple[int, int] | None:
         point = POINT()
-        if not user32.GetCursorPos(ctypes.byref(point)):
+        if user32.GetCursorPos(ctypes.byref(point)):
+            return point.x, point.y
+        return None
+
+    def _selection_press(self, _event: tk.Event) -> None:
+        point = self._cursor_position()
+        if point is None:
+            self._finish_selection()
             return
-        corner = (point.x, point.y)
-        if self.region_first_corner is None:
-            self.region_first_corner = corner
-            self.region_var.set(f"Первый угол: X {corner[0]}, Y {corner[1]}. Переместите курсор в противоположный угол и нажмите F9.")
-            self.detail_var.set("Выберите второй угол игровой области")
+        if self.selection_mode == "point":
+            self.fixed_position = point
+            self.target_var.set("fixed")
+            self.position_var.set(f"Точка выбрана: X {point[0]}, Y {point[1]}")
+            self.detail_var.set("Точка готова к запуску")
+            self._finish_selection()
+            return
+        self.selection_start = point
+        if self.selection_canvas:
+            self.selection_rect = self.selection_canvas.create_rectangle(
+                _event.x, _event.y, _event.x, _event.y, outline="#FFB547", width=3,
+            )
+
+    def _selection_drag(self, event: tk.Event) -> None:
+        if self.selection_mode == "region" and self.selection_canvas and self.selection_rect is not None:
+            start = self.selection_start
+            if start:
+                left = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+                top = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+                self.selection_canvas.coords(self.selection_rect, start[0] - left, start[1] - top, event.x, event.y)
+
+    def _selection_release(self, _event: tk.Event) -> None:
+        if self.selection_mode != "region" or self.selection_start is None:
+            return
+        end = self._cursor_position()
+        if end is None:
+            self._finish_selection()
             return
         try:
-            self.game_region = ScreenRegion.from_points(self.region_first_corner, corner)
+            self.game_region = ScreenRegion.from_points(self.selection_start, end)
         except ValueError as exc:
+            self._finish_selection()
             messagebox.showwarning("Слишком маленькая область", str(exc), parent=self.root)
             return
-        self.region_first_corner = None
         region = self.game_region
         self.region_var.set(f"Область: X {region.left}–{region.left + region.width}, Y {region.top}–{region.top + region.height}")
         if not self.golden_var.get() and not self.wrath_var.get():
             self.golden_var.set(True)
-        self.detail_var.set("Область сохранена. Запомните основное печенье F7 и запускайте F6")
+        self.detail_var.set("Область выбрана. Выберите основную точку и запускайте")
+        self._finish_selection()
 
-    def toggle(self) -> None:
-        self.stop() if self.engine.running or self.countdown_id else self.start()
+    def _cancel_selection(self, _event: tk.Event | None = None) -> None:
+        self._finish_selection()
+        self.detail_var.set("Выбор отменён")
 
-    def start(self) -> None:
+    def _finish_selection(self) -> None:
+        overlay, self.selection_overlay = self.selection_overlay, None
+        self.selection_canvas = None
+        self.selection_mode = None
+        self.selection_start = None
+        self.selection_rect = None
+        if overlay:
+            overlay.destroy()
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def toggle(self, *, from_button: bool = False) -> None:
+        if self.engine.running:
+            self.pause()
+        elif self.countdown_id:
+            self.stop()
+        elif self.paused_config:
+            self._begin(self.paused_config)
+        else:
+            self.start(from_button=from_button)
+
+    def start(self, *, from_button: bool = False) -> None:
         try: cps, delay = parse_settings(self.cps_var.get(), self.delay_var.get())
         except ValueError as exc: messagebox.showerror("Проверьте настройки", str(exc), parent=self.root); return
         golden_enabled = self.golden_var.get() or self.wrath_var.get()
@@ -341,7 +373,7 @@ class AutoClickerApp:
                 messagebox.showerror("Не готов поиск", dependency_error, parent=self.root)
                 return
             if self.game_region is None:
-                messagebox.showwarning("Не выбрана область", "Наведите курсор на первый угол игры и дважды нажмите F9: для первого и противоположного угла.", parent=self.root)
+                messagebox.showwarning("Не выбрана область", "Нажмите F9 или «Выбрать игровую область» и обведите игровое поле мышью.", parent=self.root)
                 return
             if self.fixed_position is None:
                 messagebox.showwarning("Не выбрано основное печенье", "Наведите курсор на основное печенье и нажмите F7. После ловли курсор вернётся в эту точку.", parent=self.root)
@@ -355,16 +387,20 @@ class AutoClickerApp:
         self._golden_pending = golden_enabled
         self._set_controls(False); self.stop_button.configure(state="normal")
         config = ClickConfig(cps, self.button_var.get(), position)
-        if delay: self._countdown(config, delay)
+        self.active_config = config
+        effective_delay = delay or (3 if from_button and position is None else 0)
+        if effective_delay: self._countdown(config, effective_delay)
         else: self._begin(config)
 
     def _countdown(self, config: ClickConfig, remaining: float) -> None:
         if remaining <= 0: self.countdown_id = None; self._begin(config); return
+        self.start_button.configure(text="Отменить запуск  (F6)")
         self.status_var.set("СТАРТ ЧЕРЕЗ…"); self.detail_var.set(f"{remaining:g} сек. — наведите курсор на цель")
         step = min(.1, remaining); self.countdown_id = self.root.after(int(step * 1000), lambda: self._countdown(config, round(remaining - step, 4)))
 
     def _begin(self, config: ClickConfig) -> None:
         if self.engine.start(config):
+            self.active_config, self.paused_config = config, None
             self.status_var.set("РАБОТАЕТ")
             self.detail_var.set(f"{config.cps:g} кликов/с. F8 — стоп")
             self.start_button.configure(text="Пауза  (F6)")
@@ -411,20 +447,37 @@ class AutoClickerApp:
                     self.detail_var.set(str(payload))
         self.root.after(100, self._poll_golden_events)
 
-    def stop(self) -> None:
-        if self.countdown_id: self.root.after_cancel(self.countdown_id); self.countdown_id = None
+    def pause(self) -> None:
+        if not self.engine.running or self.active_config is None:
+            return
+        self._stop_watcher()
+        self.engine.stop()
+        self.paused_config = self.active_config
+        self.status_var.set("НА ПАУЗЕ")
+        self.detail_var.set("Клики остановлены. F6 — продолжить, F8 — завершить")
+        self.start_button.configure(text="Продолжить  (F6)")
+
+    def _stop_watcher(self) -> None:
         self._golden_session += 1
         watcher, self.golden_watcher = self.golden_watcher, None
         if watcher:
             watcher.stop()
+
+    def stop(self) -> None:
+        if self.selection_overlay:
+            self._cancel_selection()
+        if self.countdown_id: self.root.after_cancel(self.countdown_id); self.countdown_id = None
+        self._stop_watcher()
         self._golden_pending = False
+        self.active_config = None
+        self.paused_config = None
         self.engine.stop(); self._set_controls(True); self.stop_button.configure(state="disabled"); self.start_button.configure(text="Запустить  (F6)")
         self.status_var.set("ГОТОВ"); self.detail_var.set("Наведите курсор на цель и нажмите F6")
 
     def _set_controls(self, enabled: bool) -> None:
         state = "normal" if enabled else "disabled"
-        self.cps.configure(state=state); self.delay.configure(state=state); self.capture_button.configure(state=state)
-        self.golden_check.configure(state=state); self.wrath_check.configure(state=state); self.region_button.configure(state=state)
+        for control in self.setting_controls:
+            control.configure(state=state)
 
     def close(self) -> None:
         self.stop()
@@ -443,7 +496,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if error else 0
 
     smoke_test = "--smoke-test" in args
-    root = tk.Tk()
+    root = ctk.CTk()
     app = AutoClickerApp(root, enable_hotkeys=not smoke_test)
     if smoke_test:
         root.after(500, app.close)

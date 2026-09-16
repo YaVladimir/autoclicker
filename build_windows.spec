@@ -6,11 +6,15 @@ The resulting application is placed in dist/Автокликер.exe.
 """
 
 
+from PyInstaller.utils.hooks import collect_data_files
+
+
 analysis = Analysis(
     ["autoclicker.py"],
     pathex=[],
     binaries=[],
-    datas=[("golden_cookie_assets/*.png", "golden_cookie_assets")],
+    datas=[("golden_cookie_assets/*.png", "golden_cookie_assets"), ("assets/autoclicker-icon.ico", "assets")]
+          + collect_data_files("customtkinter"),
     hiddenimports=["mss"],
     hookspath=[],
     hooksconfig={},
@@ -27,5 +31,6 @@ exe = EXE(
     analysis.datas,
     [],
     name="Автокликер",
+    icon="assets/autoclicker-icon.ico",
     console=False,
 )

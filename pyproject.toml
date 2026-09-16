@@ -22,6 +22,8 @@ classifiers = [
 
 [project.optional-dependencies]
 windows = [
+    "customtkinter==5.2.2; platform_system == 'Windows'",
+    "Pillow>=10,<13; platform_system == 'Windows'",
     "mss>=9,<11; platform_system == 'Windows'",
     "opencv-python-headless>=4.8,<5; platform_system == 'Windows'",
 ]
@@ -36,7 +38,7 @@ cookie-clicker-autoclicker-macos = "autoclicker_macos:main"
 
 [tool.setuptools]
 packages = ["golden_cookie_assets"]
-py-modules = ["autoclicker", "autoclicker_macos", "golden_cookie_detector", "macos_cocoa_ui"]
+py-modules = ["autoclicker", "autoclicker_macos", "golden_cookie_detector", "macos_cocoa_ui", "windows_ui"]
 
 [tool.setuptools.package-data]
 golden_cookie_assets = ["*.png"]

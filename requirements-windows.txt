@@ -1,3 +1,6 @@
-# Needed only for the optional golden-cookie detector on Windows.
+# Windows interface.
+customtkinter==5.2.2
+Pillow>=10,<13
+# Optional golden-cookie detector (included in the distributable).
 mss>=9,<11
 opencv-python-headless>=4.8,<5
